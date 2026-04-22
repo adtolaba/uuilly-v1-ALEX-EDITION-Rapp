@@ -1,0 +1,1 @@
+Audit complete. Identified hardcoded pixels and base scaling (14px). Plan to scale root font size for 1920px+.

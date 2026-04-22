@@ -1,0 +1,168 @@
+services:
+  postgres:
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'    # Reserve 1 core for DB operations
+          memory: 1G      # Limit memory to 1GB to prevent OOM on host
+
+  pgbouncer:
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+
+  backend:
+    build:
+      target: production
+    restart: always
+    depends_on:
+      pgbouncer:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'    # Limit API processing to half core
+          memory: 512M   # 512MB is plenty for a FastAPI app unless handling large uploads in-memory
+
+  frontend:
+    build:
+      target: production
+    env_file:
+      - ./.env
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G     # 1GB for build/serve process
+
+  nginx:
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+
+  redis:
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M   # Redis is usually very efficient with memory
+
+  n8n:
+    restart: always
+    environment:
+      - N8N_HOST=n8n
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+    depends_on:
+      backend:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:5678/healthz || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+
+  n8n-worker:
+    restart: always
+    depends_on:
+      n8n:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'    # Workers need more CPU for workflow execution
+          memory: 2G     # Workflows can be memory-intensive
+
+  flowise:
+    restart: always
+    environment:
+      - HTTP_SECURITY_CHECK=${HTTP_SECURITY_CHECK:-false}
+      - HTTP_DENY_LIST=${HTTP_DENY_LIST:-}
+    depends_on:
+      backend:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3001/ || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+
+  flowise-worker:
+    restart: always
+    environment:
+      - HTTP_SECURITY_CHECK=${HTTP_SECURITY_CHECK:-false}
+      - HTTP_DENY_LIST=${HTTP_DENY_LIST:-}
+    depends_on:
+      flowise:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5566/healthz"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'    # Heavy LLM processing/orchestration
+          memory: 2G

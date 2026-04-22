@@ -1,0 +1,15 @@
+# GitHub Backup Instructions
+
+1. **GitHub Repository**: https://github.com/morgacito/uuilly-v1-ALEX-EDITION.git
+2. **Personal Access Token (PAT)**: Asegúrate de tener guardado tu PAT con permisos de 'repo'.
+3. **Remote Configuration**:
+   - El remoto ya está configurado como `github`.
+   - Si necesitas reconfigurarlo: `git remote set-url github https://TU_PAT@github.com/morgacito/uuilly-v1-ALEX-EDITION.git`
+4. **Subsequent Backups**:
+   - Realiza tus commits locales primero.
+   - Para respaldar: `git push github master` (o el nombre de la rama que desees respaldar).
+5. **Workflow Guidelines**:
+   - Usa ramas de características (feature branches) para cada tarea.
+   - Haz `git add` explícito de los archivos relevantes antes de cada commit.
+   - Nunca realices merges automáticos a `master` sin consentimiento.
+   - Evita `git reset --hard` para no perder cambios locales.

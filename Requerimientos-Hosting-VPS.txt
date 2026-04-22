@@ -1,0 +1,9 @@
+Requerimientos Recomendados (Producción Fluida)
+  Para un uso intensivo de agentes, múltiples usuarios concurrentes y workflows complejos.
+   * RAM: 16 GB. (Permite que n8n y Flowise procesen datos pesados sin riesgo de OOM Out Of Memory y deja margen al
+     sistema operativo).
+   * CPU: 6 - 8 vCPUs. (Mejora drásticamente el tiempo de respuesta de la API y la velocidad de ejecución de los
+     workers).
+   * Almacenamiento: 100 GB - 160 GB NVMe/SSD. (Para backups históricos, logs extensos y crecimiento de la base de datos
+     vectorial/embeddings).
+   * Red: 1 Gbps (Para latencia mínima con los proveedores de LLM como OpenAI/Gemini).

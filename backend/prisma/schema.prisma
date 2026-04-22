@@ -1,0 +1,183 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-py"
+  recursive_type_depth = 5
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AIProvider {
+  OPENAI
+  GEMINI
+  MISTRAL
+}
+
+model AICredentials {
+  id         Int        @id @default(autoincrement())
+  name       String     @db.VarChar(100)
+  provider   AIProvider
+  api_key    String     @db.Text
+  is_active  Boolean    @default(true)
+  tasks      Json       @default("[]") @db.JsonB
+  created_at DateTime   @default(now())
+  updated_at DateTime   @updatedAt
+
+  @@map("ai_credentials")
+}
+
+model Agent {
+  id                   Int      @id @default(autoincrement())
+  name                 String   @db.VarChar(100)
+  description          String?  @db.Text // New field for agent description
+  type                 String   @db.VarChar(50)
+  url                  String   @db.VarChar(255)
+  config               String?  @db.Text
+  is_active            Boolean  @default(true)
+  is_streaming_enabled Boolean  @default(false)
+  icon                 String?  @db.VarChar(50)
+
+  // Agent Authentication Fields (Optional)
+  agent_auth_strategy     String   @default("NONE") @db.VarChar(50)
+  agent_auth_header_name  String?  @db.VarChar(100)
+  agent_auth_secret       String?  @db.Text
+
+  // Persistent Memory Fields
+  memory_enabled Boolean @default(false)
+  memory_scope   String  @default("INDIVIDUAL") @db.VarChar(20)
+
+  created_at           DateTime @default(now())
+  
+  agent_tags           AgentTag[] 
+  conversations        Conversation[]
+  memories             AgentMemory[]
+
+  @@map("agents")
+}
+
+model Conversation {
+  id         Int       @id @default(autoincrement())
+  user_id    Int
+  agent_id   Int
+  title      String    @db.VarChar(255)
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+
+  user       User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  agent      Agent     @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  messages   Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id              Int      @id @default(autoincrement())
+  text            String   @db.Text
+  sender          String   @db.VarChar(50)
+  timestamp       DateTime @default(now())
+  files           Json?    @db.JsonB
+  conversation_id Int
+
+  conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+enum UserRole {
+  USER
+  SUPERVISOR
+  ADMIN
+}
+
+model User {
+  id                Int      @id @default(autoincrement())
+  email             String   @unique
+  first_name        String?
+  last_name         String?
+  profile_photo_url String?
+  hashed_password   String?
+  role              UserRole @default(USER)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+  tags              Tag[]
+  conversations     Conversation[]
+  memories          AgentMemory[]
+  backup_logs       BackupLog[]
+
+  @@map("users")
+}
+
+model AgentMemory {
+  id         Int      @id @default(autoincrement())
+  fact       String   @db.Text
+  agent_id   Int
+  user_id    Int?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  agent      Agent    @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("agent_memories")
+}
+
+model Tag {
+  id    Int    @id @default(autoincrement())
+  name  String @unique
+  users User[]
+  
+  agent_tags AgentTag[] // New field for the explicit many-to-many relation with agents
+
+  @@map("tags")
+}
+
+// New intermediate model for Agent-Tag many-to-many relationship
+model AgentTag {
+  agent_id Int
+  tag_id   Int
+  
+  agent    Agent @relation(fields: [agent_id], references: [id])
+  tag      Tag   @relation(fields: [tag_id], references: [id])
+
+  @@id([agent_id, tag_id]) // Composite primary key
+  @@map("agent_tags")
+}
+
+model SystemSettings {
+  id                      Int      @id @default(1)
+  is_titling_enabled      Boolean  @default(false)
+  llm_provider            String   @default("openai") @db.VarChar(50)
+  llm_model               String?  @db.VarChar(100)
+  llm_api_key             String?  @db.Text
+  titling_prompt          String?  @db.Text
+  active_cred_id          Int?
+  
+  // New: Memory Extraction Settings
+  memory_extraction_model  String?  @db.VarChar(100)
+  memory_extraction_prompt String?  @db.Text
+  active_extraction_cred_id Int?
+
+  updated_at              DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
+model BackupLog {
+  id                Int      @id @default(autoincrement())
+  timestamp         DateTime @default(now())
+  user_id           Int
+  action_type       String   @db.VarChar(50) // "EXPORT", "IMPORT", "RESET"
+  entities_affected Json     @db.JsonB
+  strategy_used     String?  @db.VarChar(50) // "OVERWRITE", "SKIP", null
+  status            String   @db.VarChar(50) // "SUCCESS", "FAILURE"
+  details           String?  @db.Text
+
+  user              User     @relation(fields: [user_id], references: [id])
+
+  @@map("backup_logs")
+}

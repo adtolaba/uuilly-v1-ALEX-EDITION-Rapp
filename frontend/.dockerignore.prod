@@ -1,0 +1,14 @@
+node_modules/
+dist/
+tests/
+project_tests/
+/workspace
+.env
+Dockerfile
+.dockerignore*
+*.config.js
+README.md
+.pytest_cache
+.coverage
+*.log
+coverage/

@@ -1,0 +1,18 @@
+__pycache__
+*.pyc
+.env
+Dockerfile
+.dockerignore*
+verify_*.py
+reset_db.py
+seed.py
+stress_test_pgbouncer.py
+tests/
+project_tests/
+/workspace
+.pytest_cache
+.coverage
+*.log
+# NO ignorar la carpeta prisma/
+!prisma/
+!prisma/schema.prisma

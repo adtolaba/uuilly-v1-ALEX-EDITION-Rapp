@@ -1,0 +1,266 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    container_name: uuilly-postgres
+    # ports:
+    #   - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-uuilly}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./postgres_data:/var/lib/postgresql
+      - ./backend/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
+    networks:
+      - uuilly-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: uuilly-pgbouncer
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/uuilly_db
+    volumes:
+      - ./pgbouncer:/etc/pgbouncer
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - uuilly-network
+    # ports:
+    #   - "6432:6432"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        DATABASE_URL: ${DATABASE_URL}
+    container_name: uuilly-backend
+    working_dir: /app
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@pgbouncer:6432/${UUILLY_DB_NAME:-uuilly_db}
+      PYTHONPATH: /app
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      PUBLIC_SERVER_URL: ${PUBLIC_SERVER_URL}
+      INTERNAL_SERVER_URL: ${INTERNAL_SERVER_URL}
+    volumes:
+      - ./backend:/app
+      - ./tests:/app/tests
+    env_file:
+      - ./.env
+    depends_on:
+      pgbouncer:
+        condition: service_started
+    networks:
+      - uuilly-network
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: uuilly-frontend
+    env_file:
+      - ./.env
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - uuilly-network
+
+  nginx:
+    image: nginx:latest
+    container_name: uuilly-nginx
+    ports:
+      - "8080:9090"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - uuilly-network
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: uuilly-n8n
+    command: start
+    entrypoint: /bin/sh -c "n8n import:workflow --input=/home/node/Uuilly_Starter_Template_n8n.json && /docker-entrypoint.sh start"
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=n8n
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - EXECUTIONS_MODE=${EXECUTIONS_MODE:-queue}
+      - QUEUE_BULL_REDIS_HOST=${QUEUE_BULL_REDIS_HOST:-redis}
+      - QUEUE_BULL_REDIS_PORT=${QUEUE_BULL_REDIS_PORT:-6379}
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS:-false}
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_DATABASE=${N8N_DB_NAME:-n8n_db}
+      - DB_POSTGRESDB_HOST=pgbouncer
+      - DB_POSTGRESDB_PORT=6432
+      - DB_POSTGRESDB_USER=${DB_USER:-postgres}
+      - DB_POSTGRESDB_PASSWORD=${DB_PASSWORD:-postgres}
+      - N8N_POSTGRESDB_SSL_DISABLE=true
+      # n8n Security
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/templates/Uuilly_Starter_Template_n8n.json:/home/node/Uuilly_Starter_Template_n8n.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:5678/healthz || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      backend:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - uuilly-network
+
+  n8n-worker:
+    image: n8nio/n8n:latest
+    container_name: uuilly-n8n-worker
+    command: worker
+    environment:
+      - EXECUTIONS_MODE=${EXECUTIONS_MODE:-queue}
+      - QUEUE_BULL_REDIS_HOST=${QUEUE_BULL_REDIS_HOST:-redis}
+      - QUEUE_BULL_REDIS_PORT=${QUEUE_BULL_REDIS_PORT:-6379}
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS:-false}
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_DATABASE=${N8N_DB_NAME:-n8n_db}
+      - DB_POSTGRESDB_HOST=pgbouncer
+      - DB_POSTGRESDB_PORT=6432
+      - DB_POSTGRESDB_USER=${DB_USER:-postgres}
+      - DB_POSTGRESDB_PASSWORD=${DB_PASSWORD:-postgres}
+      - N8N_POSTGRESDB_SSL_DISABLE=true
+      # n8n Security
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      n8n:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - uuilly-network
+
+  flowise:
+    image: flowiseai/flowise:latest
+    container_name: uuilly-flowise
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - MODE=${FLOWISE_MODE:-queue}
+      - REDIS_URL=${FLOWISE_REDIS_URL:-redis://redis:6379}
+      - DATABASE_TYPE=postgres
+      - DATABASE_HOST=pgbouncer
+      - DATABASE_PORT=6432
+      - DATABASE_NAME=${FLOWISE_DB_NAME:-flowise_db}
+      - DATABASE_USER=${DB_USER:-postgres}
+      - DATABASE_PASSWORD=${DB_PASSWORD:-postgres}
+      - HTTP_SECURITY_CHECK=${HTTP_SECURITY_CHECK:-false}
+      - HTTP_DENY_LIST=${HTTP_DENY_LIST:-}
+      # Flowise Security
+      - FLOWISE_SECRETKEY_OVERWRITE=${FLOWISE_SECRETKEY_OVERWRITE}
+      - JWT_AUTH_TOKEN_SECRET=${FLOWISE_JWT_AUTH_TOKEN_SECRET}
+      - EXPRESS_SESSION_SECRET=${FLOWISE_EXPRESS_SESSION_SECRET}
+    volumes:
+      - flowise_data:/root/.flowise
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3001/ || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      backend:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - uuilly-network
+
+  flowise-worker:
+    image: flowiseai/flowise-worker:latest
+    container_name: uuilly-flowise-worker
+    environment:
+      - PORT=3001
+      - WORKER_PORT=5566
+      - MODE=${FLOWISE_MODE:-queue}
+      - REDIS_URL=${FLOWISE_REDIS_URL:-redis://redis:6379}
+      - DATABASE_TYPE=postgres
+      - DATABASE_HOST=pgbouncer
+      - DATABASE_PORT=6432
+      - DATABASE_NAME=${FLOWISE_DB_NAME:-flowise_db}
+      - DATABASE_USER=${DB_USER:-postgres}
+      - DATABASE_PASSWORD=${DB_PASSWORD:-postgres}
+      - HTTP_SECURITY_CHECK=${HTTP_SECURITY_CHECK:-false}
+      - HTTP_DENY_LIST=${HTTP_DENY_LIST:-}
+      # Flowise Security
+      - FLOWISE_SECRETKEY_OVERWRITE=${FLOWISE_SECRETKEY_OVERWRITE}
+      - JWT_AUTH_TOKEN_SECRET=${FLOWISE_JWT_AUTH_TOKEN_SECRET}
+      - EXPRESS_SESSION_SECRET=${FLOWISE_EXPRESS_SESSION_SECRET}
+    volumes:
+      - flowise_data:/root/.flowise
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5566/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      flowise:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - uuilly-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: uuilly-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - uuilly-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+networks:
+  uuilly-network:
+    driver: bridge
+
+volumes:
+  n8n_data:
+  flowise_data:
+  redis_data:

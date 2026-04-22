@@ -1,0 +1,80 @@
+services:
+  postgres:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  backend:
+    build:
+      target: development
+    volumes:
+      - ./backend:/app
+      - ./tests:/app/project_tests
+      - .:/workspace
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  frontend:
+    build:
+      target: development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  n8n:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+
+  n8n-worker:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+
+  flowise:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+
+  flowise-worker:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+
+  adminer:
+    image: adminer:latest
+    container_name: uuilly-adminer
+    ports:
+      - "8082:8080"
+    volumes:
+      - ./adminer/adminer.css:/var/www/html/adminer.css:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - uuilly-network
